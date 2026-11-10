@@ -10,6 +10,7 @@ import 'package:mesh_rescue/engine/models/envelope.dart';
 import 'package:mesh_rescue/engine/models/enums.dart';
 import 'package:mesh_rescue/services/location_service.dart';
 import 'package:mesh_rescue/services/mesh_controller.dart';
+import 'package:mesh_rescue/ui/radar/radar_view.dart';
 import 'package:mesh_rescue/ui/widgets/hold_sos_button.dart';
 
 class _TestMeshController extends MeshController {
@@ -36,7 +37,7 @@ class _TestMeshController extends MeshController {
 }
 
 void main() {
-  testWidgets('Tabs switch cleanly and HoldSosButton resists accidental taps', (tester) async {
+  testWidgets('Tabs switch cleanly, RadarView renders without offline pin canvas, and HoldSosButton resists accidental taps', (tester) async {
     final controller = _TestMeshController(
       const MeshUiState(
         bootStatus: MeshBootStatus.ready,
@@ -63,14 +64,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(controller.sosSentCount, 0);
 
-    // Switch to Feed, Map (Radar default), and Shelters tabs.
+    // Switch to Feed, Map (pure RadarView), and Shelters tabs.
     await tester.tap(find.text('Feed'));
     await tester.pumpAndSettle();
     expect(find.text('No Mesh Alerts Yet'), findsOneWidget);
 
     await tester.tap(find.text('Map'));
     await tester.pumpAndSettle();
-    expect(find.text('Radar (No Tiles)'), findsOneWidget);
+    // Pure RadarView with no offline pin canvas
+    expect(find.byType(RadarView), findsOneWidget);
+    expect(find.text('Offline Pin Canvas'), findsNothing);
 
     await tester.tap(find.text('Shelters'));
     await tester.pumpAndSettle();
@@ -78,7 +81,7 @@ void main() {
     expect(find.byIcon(Icons.shield), findsWidgets);
   });
 
-  testWidgets('Shelters screen shows Verified safe only for trusted responder, hides forged by default', (tester) async {
+  testWidgets('Shelters and Radar map strictly show verified responder shelters, completely excluding unverified/forged shelters', (tester) async {
     final signer = Ed25519Signer();
     final responder = await signer.loadKeyPairFromSeed(List<int>.filled(32, 3));
     final attacker = await signer.loadKeyPairFromSeed(List<int>.filled(32, 9));
@@ -175,21 +178,18 @@ void main() {
     await tester.tap(find.text('Shelters'));
     await tester.pumpAndSettle();
 
-    // Verified shelter shown, forged shelter hidden by default.
+    // Verified shelter shown, forged shelter completely absent and no toggle for unverified.
     expect(find.text('Govt School Camp'), findsOneWidget);
     expect(find.text('Verified safe shelter listing'), findsOneWidget);
     expect(find.text('Suspicious Trap Building'), findsNothing);
+    expect(find.text('Show community-reported (Unverified)'), findsNothing);
 
-    // Toggle community-reported -> scroll down and verify forged shelter ONLY under Unverified warning.
-    await tester.tap(find.text('Show community-reported (Unverified)'));
+    // Switch to Map tab: verified shelter is displayed on the radar map, forged shelter is not
+    await tester.tap(find.text('Map'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('Suspicious Trap Building'),
-      200,
-      scrollable: find.byType(Scrollable).last,
-    );
-    expect(find.text('Suspicious Trap Building'), findsOneWidget);
-    expect(find.text('Unverified community report • Capacity 500'), findsOneWidget);
+    expect(find.byType(RadarView), findsOneWidget);
+    expect(find.textContaining('Shelter: Govt School Camp'), findsOneWidget);
+    expect(find.textContaining('Suspicious Trap Building'), findsNothing);
   });
 
   testWidgets('HoldSosButton triggers after continuous 2s hold', (tester) async {

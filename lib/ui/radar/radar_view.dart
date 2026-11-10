@@ -129,11 +129,24 @@ class RadarView extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             if (blips.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'No geolocated SOS, hazards, or shelters received yet.',
-                  textAlign: TextAlign.center,
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    const Icon(Icons.radar, size: 40, color: MeshColors.inkSecondary),
+                    const SizedBox(height: 10),
+                    Text(
+                      'No geolocated SOS, hazards, or verified shelters received yet.',
+                      style: Theme.of(context).textTheme.titleSmall,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'As soon as a nearby peer connects, any responder-verified shelter locations will automatically sync and appear on this radar map.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
               )
             else
@@ -172,9 +185,7 @@ class RadarView extends StatelessWidget {
   static Color _colorForBlip(RadarBlip b) => switch (b.type) {
         MessageType.sos => MeshColors.sosRed,
         MessageType.hazard => MeshColors.hazardAmber,
-        MessageType.shelter => b.trust == TrustTier.verifiedResponder
-            ? MeshColors.verifiedGreen
-            : MeshColors.hazardAmber,
+        MessageType.shelter => MeshColors.verifiedGreen,
         MessageType.ack => MeshColors.primaryBlue,
       };
 }
@@ -276,12 +287,9 @@ class _RadarPainter extends CustomPainter {
             ..close();
           canvas.drawPath(path, Paint()..color = const Color(0xFFFFB300));
         case MessageType.shelter:
-          final color = blip.trust == TrustTier.verifiedResponder
-              ? const Color(0xFF66BB6A)
-              : const Color(0xFFFFB300);
           canvas.drawRect(
             Rect.fromCenter(center: pos, width: 14, height: 14),
-            Paint()..color = color,
+            Paint()..color = const Color(0xFF66BB6A),
           );
         case MessageType.ack:
           break;

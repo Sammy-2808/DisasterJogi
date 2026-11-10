@@ -3,57 +3,115 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mesh_rescue/app/providers.dart';
 import 'package:mesh_rescue/app/theme.dart';
 import 'package:mesh_rescue/engine/models/enums.dart';
+import 'package:mesh_rescue/ui/responder/responder_screen.dart';
 import 'package:mesh_rescue/ui/widgets/trust_badge.dart';
 
-class SheltersScreen extends ConsumerStatefulWidget {
+class SheltersScreen extends ConsumerWidget {
   const SheltersScreen({super.key});
 
   @override
-  ConsumerState<SheltersScreen> createState() => _SheltersScreenState();
-}
-
-class _SheltersScreenState extends ConsumerState<SheltersScreen> {
-  bool _showUnverified = false;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final mesh = ref.watch(meshControllerProvider);
     final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // Strictly verified responder shelters only
     final shelters = mesh.shelters(
-      includeUnverified: _showUnverified,
+      includeUnverified: false,
       nowSeconds: nowSec,
     );
     final verified = shelters.where((s) => s.isVerified).toList();
-    final unverified = shelters.where((s) => !s.isVerified).toList();
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Card(
-          child: SwitchListTile(
-            title: const Text(
-              'Show community-reported (Unverified)',
-              style: TextStyle(fontWeight: FontWeight.w700),
+        // Responder Action Banner
+        if (mesh.isResponderUnlocked)
+          Card(
+            color: const Color(0xFFE8F5E9),
+            child: ListTile(
+              leading: const Icon(Icons.add_location_alt,
+                  color: MeshColors.verifiedGreen),
+              title: const Text(
+                'Responder Mode Active',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text('Add or update verified shelter locations.'),
+              trailing: FilledButton.tonal(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ResponderScreen(),
+                    ),
+                  );
+                },
+                child: const Text('Add Shelter'),
+              ),
             ),
-            subtitle: const Text(
-              'Unverified entries are NOT responder-signed and may be inaccurate or forged.',
+          )
+        else
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.security, color: MeshColors.primaryBlue),
+              title: const Text('Responder Authority Mode'),
+              subtitle: const Text('Unlock to publish signed shelter locations.'),
+              trailing: TextButton(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ResponderScreen(),
+                    ),
+                  );
+                },
+                child: const Text('Unlock'),
+              ),
             ),
-            value: _showUnverified,
-            onChanged: (v) => setState(() => _showUnverified = v),
           ),
-        ),
         const SizedBox(height: 12),
-        Text(
-          'Verified Responder Shelters (${verified.length})',
-          style: Theme.of(context).textTheme.titleMedium,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Verified Responder Shelters (${verified.length})',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.verified_user, color: MeshColors.verifiedGreen, size: 16),
+                SizedBox(width: 4),
+                Text(
+                  'Responder Verified Only',
+                  style: TextStyle(
+                    color: MeshColors.verifiedGreen,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         if (verified.isEmpty)
-          const Card(
+          Card(
             child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'No responder-verified shelters received yet. Shelters appear here only when signed by a trusted responder key.',
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  const Icon(Icons.shield_outlined,
+                      size: 48, color: MeshColors.verifiedGreen),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No Responder-Verified Shelters Yet',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Shelters appear here and on the Radar map only when marked and cryptographically signed by authorized emergency responders.\n\n'
+                    'If no responders or peers are nearby, as soon as another device connects to your mesh, shelter locations will automatically sync and display.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
           )
@@ -103,6 +161,21 @@ class _SheltersScreenState extends ConsumerState<SheltersScreen> {
                       'Capacity: ${item.payload.capacity} • Update #${item.seq}'
                       '${item.distanceMeters != null ? " • ${item.distanceMeters! < 1000 ? "${item.distanceMeters!.round()} m" : "${(item.distanceMeters! / 1000).toStringAsFixed(1)} km"}" : ""}',
                     ),
+                    if (item.message.envelope.lat != null &&
+                        item.message.envelope.lng != null) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.place_outlined,
+                              size: 16, color: MeshColors.inkSecondary),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Location: ${item.message.envelope.lat!.toStringAsFixed(5)}, ${item.message.envelope.lng!.toStringAsFixed(5)}',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ],
                     if (item.payload.services.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Wrap(
@@ -127,62 +200,6 @@ class _SheltersScreenState extends ConsumerState<SheltersScreen> {
             ),
             const SizedBox(height: 8),
           ],
-        if (_showUnverified && unverified.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF3E0),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: MeshColors.hazardAmber, width: 1.5),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.warning_amber_rounded, color: MeshColors.hazardAmber),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'UNVERIFIED REPORTS: Not signed by any trusted authority. Exercise extreme caution.',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          for (final item in unverified) ...[
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.warning_amber_rounded,
-                            color: MeshColors.hazardAmber),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            item.payload.name,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ),
-                        Chip(label: Text(item.payload.status.wireName)),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    const TrustBadge(tier: TrustTier.unverified),
-                    const SizedBox(height: 6),
-                    Text('Unverified community report • Capacity ${item.payload.capacity}'),
-                    if (item.payload.note.isNotEmpty) Text(item.payload.note),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ],
       ],
     );
   }

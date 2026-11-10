@@ -99,7 +99,7 @@ class _AppShellState extends ConsumerState<AppShell> {
   static const List<String> _titles = <String>[
     'MeshRescue',
     'Mesh Feed',
-    'Radar & Map',
+    'Radar Map',
     'Shelters',
   ];
 

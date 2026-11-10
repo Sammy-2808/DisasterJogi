@@ -22,9 +22,23 @@ class _ResponderScreenState extends ConsumerState<ResponderScreen> {
       TextEditingController(text: '200');
   final TextEditingController _noteController =
       TextEditingController(text: 'Gate 2 open');
+  late final TextEditingController _latController;
+  late final TextEditingController _lngController;
   ShelterStatus _shelterStatus = ShelterStatus.open;
   final Set<String> _services = {'water', 'medical', 'food'};
   String? _pinError;
+
+  @override
+  void initState() {
+    super.initState();
+    final fix = ref.read(meshControllerProvider).locationFix;
+    _latController = TextEditingController(
+      text: fix != null ? fix.lat.toStringAsFixed(5) : '21.46800',
+    );
+    _lngController = TextEditingController(
+      text: fix != null ? fix.lng.toStringAsFixed(5) : '83.98250',
+    );
+  }
 
   @override
   void dispose() {
@@ -33,6 +47,8 @@ class _ResponderScreenState extends ConsumerState<ResponderScreen> {
     _nameController.dispose();
     _capacityController.dispose();
     _noteController.dispose();
+    _latController.dispose();
+    _lngController.dispose();
     super.dispose();
   }
 
@@ -208,6 +224,65 @@ class _ResponderScreenState extends ConsumerState<ResponderScreen> {
                         .toList(growable: false),
                   ),
                   const SizedBox(height: 10),
+                  Text(
+                    'Shelter Location (Coordinates)',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _latController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true, signed: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Latitude',
+                            hintText: 'e.g. 21.46800',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _lngController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true, signed: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Longitude',
+                            hintText: 'e.g. 83.98250',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () async {
+                        final fix = await controller.refreshLocation();
+                        if (fix != null && mounted) {
+                          setState(() {
+                            _latController.text = fix.lat.toStringAsFixed(5);
+                            _lngController.text = fix.lng.toStringAsFixed(5);
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Updated to current GPS coordinates.'),
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.my_location, size: 16),
+                      label: const Text('Use current GPS location'),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _noteController,
                     decoration: const InputDecoration(
@@ -220,6 +295,24 @@ class _ResponderScreenState extends ConsumerState<ResponderScreen> {
                     style: FilledButton.styleFrom(
                         backgroundColor: MeshColors.verifiedGreen),
                     onPressed: () async {
+                      final lat = double.tryParse(_latController.text.trim());
+                      final lng = double.tryParse(_lngController.text.trim());
+                      if (lat == null ||
+                          lng == null ||
+                          lat < -90 ||
+                          lat > 90 ||
+                          lng < -180 ||
+                          lng > 180) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Please enter valid coordinates (Lat -90..90, Lng -180..180).',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+
                       final cap = int.tryParse(_capacityController.text.trim()) ?? 100;
                       final ok = await controller.publishVerifiedShelter(
                         key: _keyController.text,
@@ -228,8 +321,10 @@ class _ResponderScreenState extends ConsumerState<ResponderScreen> {
                         capacity: cap,
                         services: _services.toList(),
                         note: _noteController.text,
-                        fallbackLat: 21.4680,
-                        fallbackLng: 83.9825,
+                        customLat: lat,
+                        customLng: lng,
+                        fallbackLat: lat,
+                        fallbackLng: lng,
                       );
                       if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(

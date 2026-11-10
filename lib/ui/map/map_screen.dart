@@ -1,25 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:mesh_rescue/app/providers.dart';
 import 'package:mesh_rescue/app/theme.dart';
 import 'package:mesh_rescue/domain/geo.dart';
 import 'package:mesh_rescue/engine/models/enums.dart';
+import 'package:mesh_rescue/services/mesh_controller.dart';
 import 'package:mesh_rescue/ui/radar/radar_view.dart';
+import 'package:mesh_rescue/ui/widgets/trust_badge.dart';
 
-class MapScreen extends ConsumerStatefulWidget {
+class MapScreen extends ConsumerWidget {
   const MapScreen({super.key});
 
   @override
-  ConsumerState<MapScreen> createState() => _MapScreenState();
-}
-
-class _MapScreenState extends ConsumerState<MapScreen> {
-  bool _showVectorMap = false;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final mesh = ref.watch(meshControllerProvider);
     final fix = mesh.locationFix;
     final refLat = fix?.lat ?? 21.4669;
@@ -28,18 +21,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     final sosList = mesh.sosAlerts(nowSeconds: nowSec);
     final hazards = mesh.hazardClusters(nowSeconds: nowSec);
-    final shelters = mesh.shelters(nowSeconds: nowSec);
+    // Only verified responder shelters are included
+    final shelters = mesh.shelters(includeUnverified: false, nowSeconds: nowSec);
 
     final blips = <RadarBlip>[];
-    final markers = <Marker>[
-      if (fix != null)
-        Marker(
-          point: LatLng(fix.lat, fix.lng),
-          width: 40,
-          height: 40,
-          child: const Icon(Icons.my_location, color: MeshColors.primaryBlue, size: 30),
-        ),
-    ];
 
     for (final s in sosList) {
       final lat = s.sos.envelope.lat;
@@ -54,14 +39,6 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           distanceMeters: haversineDistanceMeters(refLat, refLng, lat, lng),
           bearingDegrees: initialBearingDegrees(refLat, refLng, lat, lng),
           detail: s.status.wireName,
-        ),
-      );
-      markers.add(
-        Marker(
-          point: LatLng(lat, lng),
-          width: 44,
-          height: 44,
-          child: const Icon(Icons.sos, color: MeshColors.sosRed, size: 32),
         ),
       );
     }
@@ -80,18 +57,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           detail: h.confirmationLabel,
         ),
       );
-      markers.add(
-        Marker(
-          point: LatLng(h.lat, h.lng),
-          width: 40,
-          height: 40,
-          child: const Icon(Icons.warning_amber_rounded,
-              color: MeshColors.hazardAmber, size: 30),
-        ),
-      );
     }
 
+    // Shelters: Strictly show verified shelters marked by responders
     for (final sh in shelters) {
+      if (!sh.isVerified) continue;
       final lat = sh.message.envelope.lat;
       final lng = sh.message.envelope.lng;
       if (lat == null || lng == null) continue;
@@ -100,84 +70,123 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           id: sh.message.id,
           label: 'Shelter: ${sh.payload.name}',
           type: MessageType.shelter,
-          trust: sh.message.trust,
+          trust: TrustTier.verifiedResponder,
           distanceMeters: haversineDistanceMeters(refLat, refLng, lat, lng),
           bearingDegrees: initialBearingDegrees(refLat, refLng, lat, lng),
-          detail: '${sh.payload.status.wireName} • Verified safe',
-        ),
-      );
-      markers.add(
-        Marker(
-          point: LatLng(lat, lng),
-          width: 40,
-          height: 40,
-          child: const Icon(Icons.shield, color: MeshColors.verifiedGreen, size: 30),
+          detail: '${sh.payload.status.wireName} • Verified safe (Responder)',
         ),
       );
     }
 
     blips.sort((a, b) => a.distanceMeters.compareTo(b.distanceMeters));
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-          child: SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(
-                value: false,
-                icon: Icon(Icons.radar),
-                label: Text('Radar (No Tiles)'),
-              ),
-              ButtonSegment(
-                value: true,
-                icon: Icon(Icons.map_outlined),
-                label: Text('Offline Pin Canvas'),
-              ),
-            ],
-            selected: {_showVectorMap},
-            onSelectionChanged: (sel) =>
-                setState(() => _showVectorMap = sel.first),
-          ),
-        ),
-        Expanded(
-          child: _showVectorMap
-              ? Stack(
-                  children: [
-                    FlutterMap(
-                      options: MapOptions(
-                        initialCenter: LatLng(refLat, refLng),
-                        initialZoom: 15,
-                        backgroundColor: const Color(0xFFE8EEF2),
-                      ),
-                      children: [
-                        MarkerLayer(markers: markers),
-                      ],
+    return RadarView(
+      blips: blips,
+      hasUserLocation: fix != null,
+      onTapBlip: (blip) => _showBlipDetails(context, blip, mesh),
+    );
+  }
+
+  void _showBlipDetails(BuildContext context, RadarBlip blip, MeshUiState mesh) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final distStr = blip.distanceMeters < 1000
+            ? '${blip.distanceMeters.round()} m'
+            : '${(blip.distanceMeters / 1000).toStringAsFixed(1)} km';
+
+        // Check if this is a shelter
+        final shelterMatch = mesh.shelters().where((s) => s.message.id == blip.id).firstOrNull;
+
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    blip.type == MessageType.shelter
+                        ? Icons.shield
+                        : blip.type == MessageType.sos
+                            ? Icons.sos
+                            : Icons.warning_amber_rounded,
+                    color: blip.type == MessageType.shelter
+                        ? MeshColors.verifiedGreen
+                        : blip.type == MessageType.sos
+                            ? MeshColors.sosRed
+                            : MeshColors.hazardAmber,
+                    size: 32,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      blip.label,
+                      style: Theme.of(ctx).textTheme.titleLarge,
                     ),
-                    Positioned(
-                      left: 12,
-                      right: 12,
-                      bottom: 12,
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: Text(
-                            'Offline pin canvas (no raster tiles bundled). '
-                            'Center: ${refLat.toStringAsFixed(4)}, ${refLng.toStringAsFixed(4)} • '
-                            '${markers.length} marker(s).',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (blip.type == MessageType.shelter) ...[
+                const TrustBadge(
+                  tier: TrustTier.verifiedResponder,
+                  responderName: 'Authorized Responder',
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Verified safe shelter listing marked by emergency responders.',
+                  style: TextStyle(
+                    color: MeshColors.verifiedGreen,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (shelterMatch != null) ...[
+                  const SizedBox(height: 8),
+                  Text('Capacity: ${shelterMatch.payload.capacity}'),
+                  Text('Status: ${shelterMatch.payload.status.wireName}'),
+                  if (shelterMatch.payload.services.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      children: shelterMatch.payload.services
+                          .map((s) => Chip(label: Text(s)))
+                          .toList(growable: false),
                     ),
                   ],
-                )
-              : RadarView(
-                  blips: blips,
-                  hasUserLocation: fix != null,
+                  if (shelterMatch.payload.note.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text('Note: ${shelterMatch.payload.note}'),
+                  ],
+                  if (shelterMatch.message.envelope.lat != null &&
+                      shelterMatch.message.envelope.lng != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Coordinates: ${shelterMatch.message.envelope.lat!.toStringAsFixed(5)}, ${shelterMatch.message.envelope.lng!.toStringAsFixed(5)}',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ],
+              ],
+              const SizedBox(height: 10),
+              Text(
+                'Distance: $distStr • Bearing: ${blip.bearingDegrees.round()}°',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Close'),
                 ),
-        ),
-      ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

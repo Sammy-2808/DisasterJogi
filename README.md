@@ -38,7 +38,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PROTOCOL.md](docs/PROTOC
 - **SOS Lifecycle:** Hold-2s emergency SOS button with progress ring and haptic feedback; derived states `ACTIVE → ACKNOWLEDGED (RECEIVED / DISPATCHED) → RESOLVED / EXPIRED`; local `"I'm Safe"` cancellation signed by origin key; automatic rebroadcast every `30s` (`60s` in Battery Saver).
 - **Hazard Clustering & Confirmation:** Merges hazards by `(kind, geohash-7)` and promotes single reports (`REPORTED`) to `CONFIRMED` at `2+` distinct origins (`+6h` expiry per confirmation; `48h` for responder-signed hazards).
 - **Offline Cryptographic Trust:** Ed25519 signatures over canonical JSON (`engine/canonical_json.dart`). Shelters show **Verified** only when signed by a public key in `assets/trusted_responders.json`; untrusted or forged shelters are downgraded to `UNVERIFIED` and hidden by default.
-- **Zero-Tile Radar View + Pin Canvas:** `CustomPainter` radar plots SOS, hazards, and verified shelters by Haversine distance and great-circle bearing without needing map tiles.
+- **Zero-Tile Radar Map:** `CustomPainter` radar plots SOS, hazards, and responder-verified shelters by Haversine distance and great-circle bearing without needing map tiles or external connectivity. Shelters are strictly verified responder listings only.
 - **Built-in 20-Node Simulator:** Visualizes hop-by-hop propagation, random walk movement, node failures, and partition healing via a moving "data mule" node.
 - **Demo Responder Mode & Security Demo:** PIN-gated (`2026`, clearly marked **DEMO ONLY**) responder signing panel plus `"Inject Forged Shelter"` debug tool to demonstrate rejection of unsigned (`BAD_SIG`) and untrusted (`UNVERIFIED`) shelters.
 

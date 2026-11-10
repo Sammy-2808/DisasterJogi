@@ -571,6 +571,8 @@ class MeshController extends Notifier<MeshUiState> {
     required int capacity,
     required List<String> services,
     String note = '',
+    double? customLat,
+    double? customLng,
     double? fallbackLat,
     double? fallbackLng,
   }) async {
@@ -578,9 +580,13 @@ class MeshController extends Notifier<MeshUiState> {
     final responder = state.responderIdentity;
     if (engine == null || responder == null) return false;
 
-    final fix = await refreshLocation();
-    final lat = fix?.lat ?? fallbackLat;
-    final lng = fix?.lng ?? fallbackLng;
+    double? lat = customLat;
+    double? lng = customLng;
+    if (lat == null || lng == null) {
+      final fix = await refreshLocation();
+      lat = fix?.lat ?? fallbackLat;
+      lng = fix?.lng ?? fallbackLng;
+    }
     if (lat == null || lng == null) return false;
 
     final cleanKey = key.trim();
