@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mesh_rescue/app/providers.dart';
 import 'package:mesh_rescue/app/theme.dart';
 import 'package:mesh_rescue/engine/models/enums.dart';
+import 'package:mesh_rescue/ui/debug/simulator_screen.dart';
 
 class DebugScreen extends ConsumerWidget {
   const DebugScreen({super.key});
@@ -13,7 +14,7 @@ class DebugScreen extends ConsumerWidget {
     final controller = ref.read(meshControllerProvider.notifier);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Mesh Debug')),
+      appBar: AppBar(title: const Text('Mesh Debug & Security Demo')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -72,6 +73,40 @@ class DebugScreen extends ConsumerWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          onPressed: () async {
+                            await controller.injectForgedShelterDemo();
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Injected unsigned (dropped BAD_SIG) + untrusted-key shelter (UNVERIFIED only).',
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.gpp_bad_outlined),
+                          label: const Text('Inject Forged Shelter'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SimulatorScreen(),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.hub_outlined),
+                        label: const Text('20-Node Sim'),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -92,9 +127,7 @@ class DebugScreen extends ConsumerWidget {
               (p) => Card(
                 child: ListTile(
                   leading: Icon(
-                    p.state == 'CONNECTED'
-                        ? Icons.link
-                        : Icons.sync,
+                    p.state == 'CONNECTED' ? Icons.link : Icons.sync,
                     color: p.state == 'CONNECTED'
                         ? MeshColors.verifiedGreen
                         : MeshColors.hazardAmber,
@@ -211,4 +244,3 @@ class _StatusBadge extends StatelessWidget {
     );
   }
 }
-

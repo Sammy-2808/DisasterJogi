@@ -3,48 +3,219 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_rescue/app/app.dart';
 import 'package:mesh_rescue/app/providers.dart';
+import 'package:mesh_rescue/crypto/signer.dart';
+import 'package:mesh_rescue/crypto/trust_service.dart';
+import 'package:mesh_rescue/data/message_store.dart';
+import 'package:mesh_rescue/engine/models/envelope.dart';
+import 'package:mesh_rescue/engine/models/enums.dart';
+import 'package:mesh_rescue/services/location_service.dart';
 import 'package:mesh_rescue/services/mesh_controller.dart';
+import 'package:mesh_rescue/ui/widgets/hold_sos_button.dart';
 
 class _TestMeshController extends MeshController {
+  final MeshUiState initial;
+  int sosSentCount = 0;
+
+  _TestMeshController(this.initial);
+
   @override
-  MeshUiState build() {
-    return const MeshUiState(
-      bootStatus: MeshBootStatus.ready,
-      deviceId: 'test1234',
-      isAdvertising: true,
-      isDiscovering: true,
-    );
-  }
+  MeshUiState build() => initial;
 
   @override
   Future<void> initialize() async {}
+
+  @override
+  Future<void> sendSos({
+    required SosCategory category,
+    required int people,
+    String note = '',
+    String? contact,
+  }) async {
+    sosSentCount++;
+  }
 }
 
 void main() {
-  testWidgets('Bottom navigation switches between all four tabs', (tester) async {
+  testWidgets('Tabs switch cleanly and HoldSosButton resists accidental taps', (tester) async {
+    final controller = _TestMeshController(
+      const MeshUiState(
+        bootStatus: MeshBootStatus.ready,
+        deviceId: 'test1234',
+        isAdvertising: true,
+        isDiscovering: true,
+      ),
+    );
+
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          meshControllerProvider.overrideWith(_TestMeshController.new),
+          meshControllerProvider.overrideWith(() => controller),
         ],
         child: const MeshRescueApp(),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Mesh Home'), findsOneWidget);
+    expect(find.byType(HoldSosButton), findsOneWidget);
 
+    // Quick tap must NOT trigger SOS (must hold 2s).
+    await tester.tap(find.byType(HoldSosButton));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(controller.sosSentCount, 0);
+
+    // Switch to Feed, Map (Radar default), and Shelters tabs.
     await tester.tap(find.text('Feed'));
     await tester.pumpAndSettle();
-    expect(find.text('Alerts & Hazards Feed'), findsOneWidget);
+    expect(find.text('No Mesh Alerts Yet'), findsOneWidget);
 
     await tester.tap(find.text('Map'));
     await tester.pumpAndSettle();
-    expect(find.text('Offline radar and map pins will live here.'), findsOneWidget);
+    expect(find.text('Radar (No Tiles)'), findsOneWidget);
 
     await tester.tap(find.text('Shelters'));
     await tester.pumpAndSettle();
-    expect(find.text('Verified responder shelters will live here.'), findsOneWidget);
+    expect(find.textContaining('Verified Responder Shelters'), findsOneWidget);
     expect(find.byIcon(Icons.shield), findsWidgets);
+  });
+
+  testWidgets('Shelters screen shows Verified safe only for trusted responder, hides forged by default', (tester) async {
+    final signer = Ed25519Signer();
+    final responder = await signer.loadKeyPairFromSeed(List<int>.filled(32, 3));
+    final attacker = await signer.loadKeyPairFromSeed(List<int>.filled(32, 9));
+    final trust = TrustService([
+      TrustedResponder(name: 'Control HQ', pub: responder.publicKeyBase64),
+    ]);
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    final verifiedEnv = await signer.signEnvelope(
+      Envelope(
+        id: 'sh-good',
+        type: MessageType.shelter,
+        origin: responder.origin,
+        originPub: responder.publicKeyBase64,
+        ts: nowSec,
+        lat: 21.467,
+        lng: 83.982,
+        refId: null,
+        payload: const {
+          'key': 'good-1',
+          'name': 'Govt School Camp',
+          'status': 'OPEN',
+          'capacity': 200,
+          'services': ['water'],
+          'seq': 1,
+        },
+        sig: '',
+        ttl: 10,
+        hops: 1,
+      ),
+      responder,
+    );
+
+    final forgedEnv = await signer.signEnvelope(
+      Envelope(
+        id: 'sh-forged',
+        type: MessageType.shelter,
+        origin: attacker.origin,
+        originPub: attacker.publicKeyBase64,
+        ts: nowSec,
+        lat: 21.469,
+        lng: 83.985,
+        refId: null,
+        payload: const {
+          'key': 'bad-1',
+          'name': 'Suspicious Trap Building',
+          'status': 'OPEN',
+          'capacity': 500,
+          'services': ['food'],
+          'seq': 1,
+        },
+        sig: '',
+        ttl: 10,
+        hops: 1,
+      ),
+      attacker,
+    );
+
+    final controller = _TestMeshController(
+      MeshUiState(
+        bootStatus: MeshBootStatus.ready,
+        deviceId: 'test1234',
+        trustService: trust,
+        locationFix: GeoFix(lat: 21.4669, lng: 83.9812, timestampSeconds: nowSec),
+        messages: [
+          StoredMessage(
+            envelope: verifiedEnv,
+            receivedAt: nowSec,
+            geohash: 'tgcu123',
+            trust: TrustTier.verifiedResponder,
+            isLocal: false,
+          ),
+          StoredMessage(
+            envelope: forgedEnv,
+            receivedAt: nowSec,
+            geohash: 'tgcu123',
+            trust: TrustTier.unverified,
+            isLocal: false,
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          meshControllerProvider.overrideWith(() => controller),
+        ],
+        child: const MeshRescueApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Shelters'));
+    await tester.pumpAndSettle();
+
+    // Verified shelter shown, forged shelter hidden by default.
+    expect(find.text('Govt School Camp'), findsOneWidget);
+    expect(find.text('Verified safe shelter listing'), findsOneWidget);
+    expect(find.text('Suspicious Trap Building'), findsNothing);
+
+    // Toggle community-reported -> scroll down and verify forged shelter ONLY under Unverified warning.
+    await tester.tap(find.text('Show community-reported (Unverified)'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Suspicious Trap Building'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('Suspicious Trap Building'), findsOneWidget);
+    expect(find.text('Unverified community report • Capacity 500'), findsOneWidget);
+  });
+
+  testWidgets('HoldSosButton triggers after continuous 2s hold', (tester) async {
+    final controller = _TestMeshController(
+      const MeshUiState(
+        bootStatus: MeshBootStatus.ready,
+        deviceId: 'test1234',
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          meshControllerProvider.overrideWith(() => controller),
+        ],
+        child: const MeshRescueApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(HoldSosButton)),
+    );
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 2100));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(controller.sosSentCount, 1);
   });
 }
