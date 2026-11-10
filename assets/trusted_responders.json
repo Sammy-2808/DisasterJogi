@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "responders": [
+    {
+      "name": "District Control Room (DEMO)",
+      "pub": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    }
+  ]
+}
+
